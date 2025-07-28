@@ -101,8 +101,13 @@ class handler(BaseHTTPRequestHandler):
 
                 # **NEW**: Clean the description text before sending to gTTS
                 plain_text_description = clean_markdown_for_tts(description)
+                # **HERE is the correct place to add your custom text**
+                custom_text = "\nĐồng chí còn ảnh nào khác không? Làm khó Luga Vision thử xem!"
+                full_description_for_audio = plain_text_description + custom_text
 
-                audio = get_text_to_speech_audio_gtts(plain_text_description)
+                # Now, generate the audio from the combined text
+                audio = get_text_to_speech_audio_gtts(full_description_for_audio)
+
                 if not audio:
                     # Fallback: if audio fails, send the original description with markdown
                     send_message(chat_id, f"(Lỗi tạo âm thanh) Mô tả văn bản:\n\n{description}")
