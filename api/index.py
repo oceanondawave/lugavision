@@ -26,7 +26,7 @@ def get_vision_description(image_url):
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Hãy mô tả hình ảnh càng chi tiết càng tốt. Mô tả ảnh phải hợp lý và chi tiết về không gian và hãy mô tả với chất lượng tốt nhất có thể để giúp người khiếm thị nhận biết và có trải nghiệm thật chính xác. Mô tả phải chân thực và chính xác, không bỏ sót bất kỳ chi tiết nào, không được thay đổi sự thật và bịa đặt về chi tiết không có thật trong hình ảnh."},
+                            {"type": "text", "text": "Hãy mô tả hình ảnh càng chi tiết càng tốt. Mô tả ảnh phải hợp lý và chi tiết về không gian và hãy mô tả với chất lượng tốt nhất có thể để giúp người khiếm thị nhận biết và có trải nghiệm thật chính xác. Mô tả phải chân thực và chính xác, không bỏ sót bất kỳ chi tiết nào, không được thay đổi sự thật và bịa đặt về chi tiết không có thật trong hình ảnh. Hãy luôn trả về ngay mô tả hình ảnh, không cần giới thiệu hay nhắc lại yêu cầu."},
                             {"type": "image_url", "image_url": {"url": image_url}}
                         ]
                     }
@@ -39,6 +39,12 @@ def get_vision_description(image_url):
     except requests.exceptions.RequestException as e:
         print(f"OpenRouter Vision API error: {e}")
         return None
+
+def clean_markdown_for_tts(text):
+    """Removes common markdown characters from text for cleaner TTS output."""
+    # Remove bold, italics, strikethrough, code blocks, and headers
+    text = text.replace('*', '').replace('_', '').replace('~', '').replace('`', '').replace('#', '')
+    return text
 
 def get_text_to_speech_audio_gtts(text):
     """Converts text to speech using gTTS and returns the audio data as bytes."""
@@ -61,7 +67,7 @@ def send_message(chat_id, text):
 def send_audio(chat_id, audio_bytes):
     """Sends an audio file to a user."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendAudio"
-    files = {'audio': ('description.mp3', audio_bytes, 'audio/mpeg')}
+    files = {'audio': ('motahinhanh.mp3', audio_bytes, 'audio/mpeg')}
     data = {'chat_id': chat_id}
     response = requests.post(url, data=data, files=files)
     if not response.ok:
@@ -88,14 +94,17 @@ class handler(BaseHTTPRequestHandler):
 
                 description = get_vision_description(image_url)
                 if not description:
-                    send_message(chat_id, "Rất tiếc, Luga Vision không thể mô tả hình ảnh này. Thử ảnh khác đi đồng chí!")
+                    send_message(chat_id, "Rất tiếc, Luga Vision không thể mô tả hình ảnh này. Thử lại lần nữa hoặc thử ảnh khác đi đồng chí!")
                     self.send_response(200)
                     self.end_headers()
                     return
 
-                audio = get_text_to_speech_audio_gtts(description)
+                # **NEW**: Clean the description text before sending to gTTS
+                plain_text_description = clean_markdown_for_tts(description)
+
+                audio = get_text_to_speech_audio_gtts(plain_text_description)
                 if not audio:
-                    # Fallback: if audio fails, send the description as a text message
+                    # Fallback: if audio fails, send the original description with markdown
                     send_message(chat_id, f"(Lỗi tạo âm thanh) Mô tả văn bản:\n\n{description}")
                     self.send_response(200)
                     self.end_headers()
@@ -105,7 +114,7 @@ class handler(BaseHTTPRequestHandler):
 
             else:
                 chat_id = payload['message']['chat']['id']
-                send_message(chat_id, "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn.")
+                send_message(chat_id, "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết nói gì khác!")
 
             self.send_response(200)
             self.end_headers()
