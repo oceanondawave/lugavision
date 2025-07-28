@@ -1,0 +1,10 @@
+# macOS
+._*
+.DS_Store
+
+# Logs
+logs
+*.log
+
+# Vercel
+.vercel/
