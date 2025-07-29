@@ -88,33 +88,43 @@ def send_document(chat_id, text_content):
 
 def process_in_background(image_url, chat_id):
     """This function runs in a separate thread and does all the heavy work."""
+    current_step = "initializing"
     try:
+        current_step = "sending 'processing' message"
         send_message(chat_id, "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí...")
 
+        current_step = "getting vision description"
         description = get_vision_description(image_url)
         if not description:
             send_message(chat_id, "Rất tiếc, Luga Vision không thể mô tả hình ảnh này...")
             return
 
+        current_step = "cleaning markdown"
         plain_text_description = clean_markdown_for_tts(description)
         custom_text = "\nĐồng chí còn ảnh nào khác không? Làm khó Luga Vision thử xem!"
         full_description_for_audio = plain_text_description + custom_text
 
+        current_step = "generating audio"
         audio = get_ogg_audio(full_description_for_audio)
         if not audio:
             send_message(chat_id, f"Luga Vision đã gặp lỗi khi đọc cho bạn mô tả... nên mình gửi cho bạn nội dung dưới dạng tin nhắn nè:\n\n{plain_text_description}")
             return
 
+        current_step = "sending voice message"
         send_voice(chat_id, audio)
+        
+        current_step = "sending text document"
         send_document(chat_id, plain_text_description)
 
     except Exception as e:
-        print(f"Error in background thread: {e}")
+        # **FIX**: Send a detailed error message back to the user for debugging
+        error_message = f"Đã xảy ra lỗi ở bước: {current_step}.\n\nChi tiết lỗi: {str(e)}"
+        print(error_message)
         traceback.print_exc()
         try:
-            send_message(chat_id, "Đã xảy ra lỗi nghiêm trọng trong quá trình xử lý. Vui lòng thử lại sau.")
+            send_message(chat_id, error_message)
         except Exception as notify_error:
-            print(f"Failed to notify user of background error: {notify_error}")
+            print(f"Failed to notify user of error: {notify_error}")
 
 @app.route('/process', methods=['POST'])
 def process_image_request():
