@@ -141,16 +141,15 @@ export default async function handler(request, response) {
   }
 
   try {
-    const payload = await request.json();
+    // **FIX**: Vercel automatically parses the JSON body, so we use request.body
+    const payload = request.body;
 
-    // **FIX**: More robustly get the message object from the payload
     const message =
       payload.message ||
       payload.edited_message ||
       payload.channel_post ||
       payload.edited_channel_post;
 
-    // If there's no message or chat information we can use, safely exit.
     if (!message || !message.chat || !message.chat.id) {
       console.log("Received a non-message update, ignoring.");
       return response.status(200).send("OK");
@@ -158,7 +157,6 @@ export default async function handler(request, response) {
 
     const chatId = message.chat.id;
 
-    // Check if the message contains a photo
     if (message.photo) {
       await sendMessage(
         chatId,
@@ -201,7 +199,6 @@ export default async function handler(request, response) {
       await sendVoice(chatId, audio);
       await sendDocument(chatId, plainTextDescription);
     } else {
-      // If it's a message but not a photo, send the help text.
       await sendMessage(
         chatId,
         "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết nói gì khác!"
@@ -209,7 +206,6 @@ export default async function handler(request, response) {
     }
   } catch (error) {
     console.error("Error in main handler:", error);
-    // Try to send an error message to the user if possible
     if (request.body && request.body.message && request.body.message.chat) {
       await sendMessage(
         request.body.message.chat.id,
