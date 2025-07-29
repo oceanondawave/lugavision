@@ -8,7 +8,7 @@ from gtts import gTTS
 from pydub import AudioSegment
 from io import BytesIO
 import traceback
-import threading
+# threading is no longer needed
 
 # --- CONFIGURATION ---
 # This service now needs all the secrets
@@ -86,8 +86,9 @@ def send_document(chat_id, text_content):
     files = {'document': ('motahinhanh.txt', text_file, 'text/plain')}
     requests.post(url, data={'chat_id': chat_id}, files=files)
 
-def process_in_background(image_url, chat_id):
-    """This function runs in a separate thread and does all the heavy work."""
+# This function is no longer run in a separate thread.
+def process_image(image_url, chat_id):
+    """This function now runs synchronously and does all the heavy work."""
     current_step = "initializing"
     try:
         current_step = "sending 'processing' message"
@@ -117,7 +118,6 @@ def process_in_background(image_url, chat_id):
         send_document(chat_id, plain_text_description)
 
     except Exception as e:
-        # **FIX**: Send a detailed error message back to the user for debugging
         error_message = f"Đã xảy ra lỗi ở bước: {current_step}.\n\nChi tiết lỗi: {str(e)}"
         print(error_message)
         traceback.print_exc()
@@ -135,9 +135,9 @@ def process_image_request():
     image_url = data['image_url']
     chat_id = data['chat_id']
 
-    # Create and start a background thread to do the work
-    thread = threading.Thread(target=process_in_background, args=(image_url, chat_id))
-    thread.start()
+    # **FIX**: Call the processing function directly instead of using a thread.
+    # The Vercel bot will not wait for this to finish.
+    process_image(image_url, chat_id)
 
     # Immediately return a success response to the Vercel bot
     return jsonify({"status": "processing_started"}), 202
