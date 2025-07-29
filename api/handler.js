@@ -207,21 +207,24 @@ export default async function handler(request, response) {
       return response.status(200).send("OK");
     }
 
-    // **FIX**: The logic has been restructured to wait for the process to finish.
+    // **FIX**: The logic has been restructured to prevent multiple responses.
     if (message.photo) {
-      // Now we wait for the entire image processing to complete.
-      await processImage(message);
+      // If it's a photo, respond immediately to Telegram to prevent retries.
+      response.status(200).send("OK");
+      // Then, start the long-running image processing without waiting for it to finish.
+      processImage(message);
     } else {
-      // If it's NOT a photo, send the help message.
+      // If it's NOT a photo, send the help message first.
       await sendMessage(
         message.chat.id,
         "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết trò chuyện gì khác đâu đồng chí ơi."
       );
+      // Then, send the success response.
+      return response.status(200).send("OK");
     }
   } catch (error) {
     console.error("Error in main handler:", error);
+    // If an error happens in the initial handling, send a generic response.
+    return response.status(200).send("OK");
   }
-
-  // **FIX**: Always send a final "OK" response to Telegram after everything is done.
-  return response.status(200).send("OK");
 }
