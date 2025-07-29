@@ -4,6 +4,7 @@ from flask import Flask, request, jsonify, send_file
 from gtts import gTTS
 from pydub import AudioSegment
 from io import BytesIO
+import traceback # Import the traceback module to get detailed errors
 
 # Initialize the Flask app
 app = Flask(__name__)
@@ -45,8 +46,15 @@ def convert_text_to_audio():
         )
 
     except Exception as e:
+        # **FIX**: Instead of just printing, return the actual error message in the JSON response
         print(f"An error occurred: {e}")
-        return jsonify({"error": "Failed to process audio"}), 500
+        # Get the full traceback for detailed debugging
+        error_details = traceback.format_exc()
+        print(error_details)
+        return jsonify({
+            "error": f"Failed to process audio: {str(e)}",
+            "details": error_details
+        }), 500
 
 # This allows running the app locally for testing if needed
 if __name__ == '__main__':
