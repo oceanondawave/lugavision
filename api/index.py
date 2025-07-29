@@ -1,9 +1,11 @@
 import os
 import requests
 import json
+import re # Import the regular expression module
 from http.server import BaseHTTPRequestHandler
 from gtts import gTTS
 from io import BytesIO
+from pydub import AudioSegment
 
 # --- CONFIGURATION ---
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -26,7 +28,7 @@ def get_vision_description(image_url):
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Hãy mô tả hình ảnh càng chi tiết càng tốt. Mô tả ảnh phải hợp lý và chi tiết về không gian và hãy mô tả với chất lượng tốt nhất có thể để giúp người khiếm thị nhận biết và có trải nghiệm thật chính xác. Mô tả phải chân thực và chính xác, không bỏ sót bất kỳ chi tiết nào, không được thay đổi sự thật và bịa đặt về chi tiết không có thật trong hình ảnh. Hãy luôn trả về ngay mô tả hình ảnh, không cần giới thiệu hay nhắc lại yêu cầu."},
+                            {"type": "text", "text": "Hãy mô tả hình ảnh càng chi tiết càng tốt. Mô tả ảnh phải hợp lý và chi tiết về không gian và hãy mô tả với chất lượng tốt nhất có thể để giúp người khiếm thị nhận biết và có trải nghiệm thật chính xác. Mô tả phải chân thực và chính xác, không bỏ sót bất kỳ chi tiết nào, không được thay đổi sự thật và bịa đặt về chi tiết không có thật trong hình ảnh. Nếu trong ảnh có từ ngữ bằng Tiếng Anh, hãy giữ nguyên các từ ngữ đó trong câu trả lời, sau đó dịch lại bằng Tiếng Việt. Hãy luôn trả về ngay mô tả hình ảnh, không cần giới thiệu hay nhắc lại yêu cầu."},
                             {"type": "image_url", "image_url": {"url": image_url}}
                         ]
                     }
@@ -42,21 +44,59 @@ def get_vision_description(image_url):
 
 def clean_markdown_for_tts(text):
     """Removes common markdown characters from text for cleaner TTS output."""
-    # Remove bold, italics, strikethrough, code blocks, and headers
     text = text.replace('*', '').replace('_', '').replace('~', '').replace('`', '').replace('#', '')
     return text
 
-def get_text_to_speech_audio_gtts(text):
-    """Converts text to speech using gTTS and returns the audio data as bytes."""
+# *** NEW, ADVANCED TTS FUNCTION ***
+def get_bilingual_speech_audio(text):
+    """
+    Generates speech from text, switching between Vietnamese and English voices,
+    and returns the final audio sped up by 2x.
+    """
     try:
-        audio_fp = BytesIO()
-        tts = gTTS(text, lang='vi', slow=False)
-        tts.write_to_fp(audio_fp)
-        audio_fp.seek(0)
-        return audio_fp.read()
+        # Regex to find English words/phrases (and numbers)
+        english_pattern = r'[a-zA-Z0-9\s.,!?\'"-]+'
+        
+        # Split the text into Vietnamese and English parts
+        parts = re.split(f'({english_pattern})', text)
+        
+        # This will hold the combined audio
+        combined_sound = AudioSegment.empty()
+
+        for part in parts:
+            if not part.strip():
+                continue
+
+            # Determine the language of the part
+            if re.fullmatch(english_pattern, part.strip()):
+                lang = 'en'
+            else:
+                lang = 'vi'
+            
+            # Generate audio for this part
+            gtts_fp = BytesIO()
+            tts = gTTS(text=part.strip(), lang=lang, slow=False)
+            tts.write_to_fp(gtts_fp)
+            gtts_fp.seek(0)
+            
+            # Load the audio part with pydub and add it to the combined audio
+            sound_part = AudioSegment.from_file(gtts_fp, format="mp3")
+            combined_sound += sound_part
+
+        # Speed up the final combined audio
+        fast_sound = combined_sound.speedup(playback_speed=2.0)
+
+        # Export to an in-memory file
+        final_audio_fp = BytesIO()
+        fast_sound.export(final_audio_fp, format="mp3")
+        final_audio_fp.seek(0)
+
+        return final_audio_fp.read()
+
     except Exception as e:
-        print(f"gTTS error: {e}")
+        print(f"Bilingual TTS error: {e}")
         return None
+
 
 def send_message(chat_id, text):
     """Sends a text message to a user."""
@@ -72,6 +112,16 @@ def send_audio(chat_id, audio_bytes):
     response = requests.post(url, data=data, files=files)
     if not response.ok:
         print(f"Telegram sendAudio error: {response.text}")
+
+def send_document(chat_id, text_content):
+    """Sends a text file to a user."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
+    text_file = BytesIO(text_content.encode('utf-8'))
+    files = {'document': ('motahinhanh.txt', text_file, 'text/plain')}
+    data = {'chat_id': chat_id}
+    response = requests.post(url, data=data, files=files)
+    if not response.ok:
+        print(f"Telegram sendDocument error: {response.text}")
 
 # --- MAIN HANDLER for Vercel ---
 
@@ -99,23 +149,22 @@ class handler(BaseHTTPRequestHandler):
                     self.end_headers()
                     return
 
-                # **NEW**: Clean the description text before sending to gTTS
                 plain_text_description = clean_markdown_for_tts(description)
-                # **HERE is the correct place to add your custom text**
+                
                 custom_text = "\nĐồng chí còn ảnh nào khác không? Làm khó Luga Vision thử xem!"
                 full_description_for_audio = plain_text_description + custom_text
 
-                # Now, generate the audio from the combined text
-                audio = get_text_to_speech_audio_gtts(full_description_for_audio)
+                # **MODIFIED**: Call the new advanced bilingual function
+                audio = get_bilingual_speech_audio(full_description_for_audio)
 
                 if not audio:
-                    # Fallback: if audio fails, send the original description with markdown
                     send_message(chat_id, f"(Lỗi tạo âm thanh) Mô tả văn bản:\n\n{description}")
                     self.send_response(200)
                     self.end_headers()
                     return
 
                 send_audio(chat_id, audio)
+                send_document(chat_id, plain_text_description)
 
             else:
                 chat_id = payload['message']['chat']['id']
