@@ -194,7 +194,6 @@ export default async function handler(request, response) {
     return response.status(405).send("Method Not Allowed");
   }
 
-  // **FIX**: The main handler now responds immediately and does the work afterwards.
   try {
     const payload = request.body;
     const message =
@@ -208,22 +207,26 @@ export default async function handler(request, response) {
       return response.status(200).send("OK");
     }
 
-    // **STEP 1: Acknowledge the request immediately to prevent Telegram retries.**
-    response.status(200).send("OK");
-
-    // **STEP 2: Now, do the actual work.**
+    // **FIX**: The logic is now correctly structured to prevent repeated responses.
     if (message.photo) {
+      // **Step 1**: Acknowledge the request immediately to prevent Telegram retries.
+      response.status(200).send("OK");
+
+      // **Step 2**: Now, do the actual work in the background.
       // We don't use 'await' here because we've already sent the response.
-      // The function will continue to run in the background.
       processImage(message);
     } else {
-      // For simple text messages, we can still await the response.
+      // For simple text messages, which are fast, we can await the response.
       await sendMessage(
         message.chat.id,
         "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết trò chuyện gì khác đâu đồng chí ơi."
       );
+      // Then send the final OK.
+      return response.status(200).send("OK");
     }
   } catch (error) {
     console.error("Error in main handler:", error);
+    // In case of an error during initial parsing, still send an OK response.
+    return response.status(200).send("OK");
   }
 }
