@@ -8,7 +8,7 @@ from gtts import gTTS
 from pydub import AudioSegment
 from io import BytesIO
 import traceback
-# threading is no longer needed
+import threading
 
 # --- CONFIGURATION ---
 # This service now needs all the secrets
@@ -86,45 +86,37 @@ def send_document(chat_id, text_content):
     files = {'document': ('motahinhanh.txt', text_file, 'text/plain')}
     requests.post(url, data={'chat_id': chat_id}, files=files)
 
-# This function is no longer run in a separate thread.
-def process_image(image_url, chat_id):
-    """This function now runs synchronously and does all the heavy work."""
-    current_step = "initializing"
+# **FIX**: This function now runs in a background thread to avoid timeouts.
+def process_in_background(image_url, chat_id):
+    """This function runs in a separate thread and does all the heavy work."""
     try:
-        current_step = "sending 'processing' message"
+        # The very first step is to send the "processing" message.
         send_message(chat_id, "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí...")
 
-        current_step = "getting vision description"
         description = get_vision_description(image_url)
         if not description:
             send_message(chat_id, "Rất tiếc, Luga Vision không thể mô tả hình ảnh này...")
             return
 
-        current_step = "cleaning markdown"
         plain_text_description = clean_markdown_for_tts(description)
         custom_text = "\nĐồng chí còn ảnh nào khác không? Làm khó Luga Vision thử xem!"
         full_description_for_audio = plain_text_description + custom_text
 
-        current_step = "generating audio"
         audio = get_ogg_audio(full_description_for_audio)
         if not audio:
             send_message(chat_id, f"Luga Vision đã gặp lỗi khi đọc cho bạn mô tả... nên mình gửi cho bạn nội dung dưới dạng tin nhắn nè:\n\n{plain_text_description}")
             return
 
-        current_step = "sending voice message"
         send_voice(chat_id, audio)
-        
-        current_step = "sending text document"
         send_document(chat_id, plain_text_description)
 
     except Exception as e:
-        error_message = f"Đã xảy ra lỗi ở bước: {current_step}.\n\nChi tiết lỗi: {str(e)}"
-        print(error_message)
+        print(f"Error in background thread: {e}")
         traceback.print_exc()
         try:
-            send_message(chat_id, error_message)
+            send_message(chat_id, "Đã xảy ra lỗi nghiêm trọng trong quá trình xử lý. Vui lòng thử lại sau.")
         except Exception as notify_error:
-            print(f"Failed to notify user of error: {notify_error}")
+            print(f"Failed to notify user of background error: {notify_error}")
 
 @app.route('/process', methods=['POST'])
 def process_image_request():
@@ -135,11 +127,11 @@ def process_image_request():
     image_url = data['image_url']
     chat_id = data['chat_id']
 
-    # **FIX**: Call the processing function directly instead of using a thread.
-    # The Vercel bot will not wait for this to finish.
-    process_image(image_url, chat_id)
+    # **FIX**: Create and start a background thread to do the work.
+    thread = threading.Thread(target=process_in_background, args=(image_url, chat_id))
+    thread.start()
 
-    # Immediately return a success response to the Vercel bot
+    # **FIX**: Immediately return a success response to the Vercel bot so it doesn't time out.
     return jsonify({"status": "processing_started"}), 202
 
 if __name__ == '__main__':
