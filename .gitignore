@@ -6,5 +6,8 @@
 logs
 *.log
 
+# Python
+*.venv
+
 # Vercel
 .vercel/
