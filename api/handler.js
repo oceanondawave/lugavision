@@ -128,7 +128,7 @@ async function sendDocument(chatId, textContent) {
   const formData = new FormData();
   formData.append("chat_id", String(chatId));
   const textBlob = new Blob([textContent], { type: "text/plain" });
-  formData.append("document", textBlob, "description.txt");
+  formData.append("document", textBlob, "motahinhanh.txt");
 
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`;
   await fetch(url, { method: "POST", body: formData });
@@ -177,7 +177,7 @@ export default async function handler(request, response) {
       if (!description) {
         await sendMessage(
           chatId,
-          "Rất tiếc, Luga Vision không thể mô tả hình ảnh này. Thử lại lần nữa hoặc thử ảnh khác đi đồng chí!"
+          "Rất tiếc, Luga Vision không thể mô tả hình ảnh này (chắc do hết lượt dùng trong ngày rồi, mai thử lại nha, do thằng tác giả nghèo nên nó xài đồ free đó). Thử lại lần nữa hoặc thử ảnh khác đi đồng chí!"
         );
         return response.status(200).send("OK");
       }
@@ -191,7 +191,7 @@ export default async function handler(request, response) {
       if (!audio) {
         await sendMessage(
           chatId,
-          `(Lỗi tạo âm thanh) Mô tả văn bản:\n\n${description}`
+          `Luga Vision đã gặp lỗi khi đọc cho bạn mô tả (chắc do thằng tác giả nghèo nên nó xài server free, thông cảm đi mà), nên mình gửi cho bạn nội dung dưới dạng tin nhắn nè:\n\n${plainTextDescription}`
         );
         return response.status(200).send("OK");
       }
@@ -201,7 +201,7 @@ export default async function handler(request, response) {
     } else {
       await sendMessage(
         chatId,
-        "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết nói gì khác!"
+        "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết trò chuyện gì khác đâu đồng chí ơi."
       );
     }
   } catch (error) {
@@ -209,7 +209,7 @@ export default async function handler(request, response) {
     if (request.body && request.body.message && request.body.message.chat) {
       await sendMessage(
         request.body.message.chat.id,
-        "Đã xảy ra lỗi. Vui lòng thử lại."
+        "Đã xảy ra lỗi. Vui lòng thử lại đi đồng chí (thử lại không được thì do thằng tác giả nghèo nên nó xài server free nên có giới hạn, thông cảm cho tớ nhé)."
       );
     }
   }
