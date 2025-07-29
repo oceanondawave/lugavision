@@ -28,16 +28,13 @@ def convert_text_to_audio():
         # 2. Load the audio from the in-memory file with pydub
         sound = AudioSegment.from_file(gtts_fp, format="mp3")
 
-        # 3. Speed it up (1.0 is normal speed)
-        fast_sound = sound.speedup(playback_speed=1.0)
-
-        # 4. Export the new, faster audio to another in-memory file in OGG format
+        # 3. Export the audio directly to OGG format with a specified bitrate for better quality.
+        #    The speedup function is not needed for 1.0x speed.
         final_audio_fp = BytesIO()
-        # Use 'ogg' format and 'libopus' codec for Telegram voice messages
-        fast_sound.export(final_audio_fp, format="ogg", codec="libopus")
+        sound.export(final_audio_fp, format="ogg", codec="libopus", bitrate="48k")
         final_audio_fp.seek(0)
 
-        # 5. Send the audio file back in the response
+        # 4. Send the audio file back in the response
         return send_file(
             final_audio_fp,
             mimetype="audio/ogg",
