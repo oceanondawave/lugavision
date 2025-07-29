@@ -8,6 +8,7 @@ from gtts import gTTS
 from pydub import AudioSegment
 from io import BytesIO
 import traceback
+import threading
 
 # --- CONFIGURATION ---
 # This service now needs all the secrets
@@ -16,10 +17,10 @@ OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
 
 app = Flask(__name__)
 
-# --- HELPER FUNCTIONS (MOVED FROM JAVASCRIPT BOT) ---
+# --- HELPER FUNCTIONS ---
 
 def get_vision_description(image_url):
-    # ... (This function is the same as the one from your JS bot)
+    """Gets a Vietnamese description of an image using the OpenRouter Vision API."""
     try:
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
@@ -48,10 +49,11 @@ def get_vision_description(image_url):
         return None
 
 def clean_markdown_for_tts(text):
+    """Removes common markdown characters from text for cleaner TTS output."""
     return text.replace('*', '').replace('_', '').replace('~', '').replace('`', '').replace('#', '')
 
 def get_ogg_audio(text):
-    # ... (This is the same conversion logic as before)
+    """Converts text to speech using gTTS and returns the audio data as bytes."""
     try:
         gtts_fp = BytesIO()
         tts = gTTS(text=text, lang='vi', slow=False)
@@ -67,20 +69,52 @@ def get_ogg_audio(text):
         return None
 
 def send_message(chat_id, text):
+    """Sends a text message to a user."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": chat_id, "text": text})
 
 def send_voice(chat_id, ogg_audio_bytes):
+    """Sends an OGG audio file as a playable voice message."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVoice"
     files = {'voice': ('voice.ogg', ogg_audio_bytes, 'audio/ogg')}
     requests.post(url, data={'chat_id': chat_id}, files=files)
 
 def send_document(chat_id, text_content):
+    """Sends a text file to a user."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
     text_file = BytesIO(text_content.encode('utf-8'))
     files = {'document': ('motahinhanh.txt', text_file, 'text/plain')}
     requests.post(url, data={'chat_id': chat_id}, files=files)
 
+def process_in_background(image_url, chat_id):
+    """This function runs in a separate thread and does all the heavy work."""
+    try:
+        send_message(chat_id, "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí...")
+
+        description = get_vision_description(image_url)
+        if not description:
+            send_message(chat_id, "Rất tiếc, Luga Vision không thể mô tả hình ảnh này...")
+            return
+
+        plain_text_description = clean_markdown_for_tts(description)
+        custom_text = "\nĐồng chí còn ảnh nào khác không? Làm khó Luga Vision thử xem!"
+        full_description_for_audio = plain_text_description + custom_text
+
+        audio = get_ogg_audio(full_description_for_audio)
+        if not audio:
+            send_message(chat_id, f"Luga Vision đã gặp lỗi khi đọc cho bạn mô tả... nên mình gửi cho bạn nội dung dưới dạng tin nhắn nè:\n\n{plain_text_description}")
+            return
+
+        send_voice(chat_id, audio)
+        send_document(chat_id, plain_text_description)
+
+    except Exception as e:
+        print(f"Error in background thread: {e}")
+        traceback.print_exc()
+        try:
+            send_message(chat_id, "Đã xảy ra lỗi nghiêm trọng trong quá trình xử lý. Vui lòng thử lại sau.")
+        except Exception as notify_error:
+            print(f"Failed to notify user of background error: {notify_error}")
 
 @app.route('/process', methods=['POST'])
 def process_image_request():
@@ -91,37 +125,12 @@ def process_image_request():
     image_url = data['image_url']
     chat_id = data['chat_id']
 
-    try:
-        send_message(chat_id, "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí...")
+    # Create and start a background thread to do the work
+    thread = threading.Thread(target=process_in_background, args=(image_url, chat_id))
+    thread.start()
 
-        description = get_vision_description(image_url)
-        if not description:
-            send_message(chat_id, "Rất tiếc, Luga Vision không thể mô tả hình ảnh này...")
-            return jsonify({"status": "failed", "reason": "Could not get description"})
-
-        plain_text_description = clean_markdown_for_tts(description)
-        custom_text = "\nĐồng chí còn ảnh nào khác không? Làm khó Luga Vision thử xem!"
-        full_description_for_audio = plain_text_description + custom_text
-
-        audio = get_ogg_audio(full_description_for_audio)
-        if not audio:
-            send_message(chat_id, f"Luga Vision đã gặp lỗi khi đọc cho bạn mô tả... nên mình gửi cho bạn nội dung dưới dạng tin nhắn nè:\n\n{plain_text_description}")
-            return jsonify({"status": "failed", "reason": "Audio generation failed"})
-
-        send_voice(chat_id, audio)
-        send_document(chat_id, plain_text_description)
-
-        return jsonify({"status": "success"})
-
-    except Exception as e:
-        print(f"An error occurred in /process: {e}")
-        traceback.print_exc()
-        # Try to notify the user of a failure
-        try:
-            send_message(chat_id, "Đã xảy ra lỗi nghiêm trọng. Vui lòng thử lại sau.")
-        except Exception as notify_error:
-            print(f"Failed to notify user of error: {notify_error}")
-        return jsonify({"error": "An internal error occurred"}), 500
+    # Immediately return a success response to the Vercel bot
+    return jsonify({"status": "processing_started"}), 202
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
