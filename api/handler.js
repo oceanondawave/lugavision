@@ -140,18 +140,32 @@ export default async function handler(request, response) {
     return response.status(405).send("Method Not Allowed");
   }
 
-  const payload = request.body;
+  try {
+    const payload = await request.json();
 
-  if (payload.message && payload.message.photo) {
-    const chatId = payload.message.chat.id;
+    // **FIX**: More robustly get the message object from the payload
+    const message =
+      payload.message ||
+      payload.edited_message ||
+      payload.channel_post ||
+      payload.edited_channel_post;
 
-    try {
+    // If there's no message or chat information we can use, safely exit.
+    if (!message || !message.chat || !message.chat.id) {
+      console.log("Received a non-message update, ignoring.");
+      return response.status(200).send("OK");
+    }
+
+    const chatId = message.chat.id;
+
+    // Check if the message contains a photo
+    if (message.photo) {
       await sendMessage(
         chatId,
         "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí..."
       );
 
-      const photo = payload.message.photo.pop();
+      const photo = message.photo.pop();
       const fileId = photo.file_id;
 
       const fileInfoUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`;
@@ -186,18 +200,22 @@ export default async function handler(request, response) {
 
       await sendVoice(chatId, audio);
       await sendDocument(chatId, plainTextDescription);
-    } catch (error) {
-      console.error("Error in main handler:", error);
+    } else {
+      // If it's a message but not a photo, send the help text.
       await sendMessage(
-        payload.message.chat.id,
+        chatId,
+        "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết nói gì khác!"
+      );
+    }
+  } catch (error) {
+    console.error("Error in main handler:", error);
+    // Try to send an error message to the user if possible
+    if (request.body && request.body.message && request.body.message.chat) {
+      await sendMessage(
+        request.body.message.chat.id,
         "Đã xảy ra lỗi. Vui lòng thử lại."
       );
     }
-  } else {
-    await sendMessage(
-      payload.message.chat.id,
-      "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết nói gì khác!"
-    );
   }
 
   return response.status(200).send("OK");
