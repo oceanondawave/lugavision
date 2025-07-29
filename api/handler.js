@@ -57,11 +57,12 @@ export default async function handler(request, response) {
       return response.status(200).send("OK");
     }
 
-    // Immediately acknowledge the request to prevent Telegram retries.
-    response.status(200).send("OK");
-
-    // Now, do the work.
+    // **FIX**: The logic is now correctly separated for photos and text messages.
     if (message.photo) {
+      // For photos, respond to Telegram immediately to prevent timeouts and retries.
+      response.status(200).send("OK");
+
+      // Then, start the long process in the background.
       const chatId = message.chat.id;
       const photo = message.photo.pop();
       const fileId = photo.file_id;
@@ -76,12 +77,19 @@ export default async function handler(request, response) {
       // Delegate the long-running task to the Koyeb service
       delegate_task_to_worker(imageUrl, chatId);
     } else {
+      // For text messages, the reply is fast. We can send it before responding.
       await sendMessage(
         message.chat.id,
         "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết trò chuyện gì khác đâu đồng chí ơi."
       );
+      // After sending the message, we send the final OK response.
+      return response.status(200).send("OK");
     }
   } catch (error) {
     console.error("Error in main handler:", error);
+    // In case of an error, still try to send an OK response so Telegram doesn't retry.
+    if (!response.headersSent) {
+      response.status(200).send("OK");
+    }
   }
 }
