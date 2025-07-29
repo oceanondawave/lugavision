@@ -29,7 +29,7 @@ async function getVisionDescription(imageUrl) {
               content: [
                 {
                   type: "text",
-                  text: "Hãy mô tả hình ảnh càng chi tiết càng tốt. Mô tả ảnh phải hợp lý và chi tiết về không gian và hãy mô tả với chất lượng tốt nhất có thể để giúp người khiếm thị nhận biết và có trải nghiệm thật chính xác. Mô tả phải chân thực và chính xác, không bỏ sót bất kỳ chi tiết nào, không được thay đổi sự thật và bịa đặt về chi tiết không có thật trong hình ảnh. Nếu trong ảnh có chữ bằng Tiếng Anh, hãy giữ nguyên nó trong câu trả lời sau đó dịch sang Tiếng Việt. Hãy luôn trả về ngay mô tả hình ảnh, không cần giới thiệu hay nhắc lại yêu cầu.",
+                  text: "Hãy mô tả hình ảnh càng chi tiết càng tốt. Mô tả ảnh phải hợp lý và chi tiết về không gian và hãy mô tả với chất lượng tốt nhất có thể để giúp người khiếm thị nhận biết và có trải nghiệm thật chính xác. Mô tả phải chân thực và chính xác, không bỏ sót bất kỳ chi tiết nào, không được thay đổi sự thật và bịa đặt về chi tiết không có thật trong hình ảnh. Nếu trong ảnh có chữ bằng Tiếng Anh hoặc ngôn ngữ khác, hãy giữ nguyên nó trong câu trả lời sau đó dịch sang Tiếng Việt. Hãy luôn trả về ngay mô tả hình ảnh, không cần giới thiệu hay nhắc lại yêu cầu.",
                 },
                 {
                   type: "image_url",
@@ -134,6 +134,60 @@ async function sendDocument(chatId, textContent) {
   await fetch(url, { method: "POST", body: formData });
 }
 
+// **NEW**: This function contains the long-running logic.
+async function processImage(message) {
+  const chatId = message.chat.id;
+
+  try {
+    await sendMessage(
+      chatId,
+      "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí..."
+    );
+
+    const photo = message.photo.pop();
+    const fileId = photo.file_id;
+
+    const fileInfoUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`;
+    const fileInfoRes = await fetch(fileInfoUrl);
+    const fileInfo = await fileInfoRes.json();
+    const filePath = fileInfo.result.file_path;
+
+    const imageUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`;
+
+    const description = await getVisionDescription(imageUrl);
+    if (!description) {
+      await sendMessage(
+        chatId,
+        "Rất tiếc, Luga Vision không thể mô tả hình ảnh này (chắc do hết lượt dùng trong ngày rồi, mai thử lại nha, do thằng tác giả nghèo nên nó xài đồ free đó). Thử lại lần nữa hoặc thử ảnh khác đi đồng chí!"
+      );
+      return;
+    }
+
+    const plainTextDescription = cleanMarkdownForTts(description);
+    const customText =
+      "\nĐồng chí còn ảnh nào khác không? Làm khó Luga Vision thử xem!";
+    const fullDescriptionForAudio = plainTextDescription + customText;
+
+    const audio = await getOggAudioFromConverter(fullDescriptionForAudio);
+    if (!audio) {
+      await sendMessage(
+        chatId,
+        `Luga Vision đã gặp lỗi khi đọc cho bạn mô tả (chắc do thằng tác giả nghèo nên nó xài server free, thông cảm đi mà), nên mình gửi cho bạn nội dung dưới dạng tin nhắn nè:\n\n${plainTextDescription}`
+      );
+      return;
+    }
+
+    await sendVoice(chatId, audio);
+    await sendDocument(chatId, plainTextDescription);
+  } catch (error) {
+    console.error("Error in processImage:", error);
+    await sendMessage(
+      chatId,
+      "Đã xảy ra lỗi. Vui lòng thử lại đi đồng chí (thử lại không được thì do thằng tác giả nghèo nên nó xài server free nên có giới hạn, thông cảm cho tớ nhé)."
+    );
+  }
+}
+
 // --- MAIN HANDLER ---
 export default async function handler(request, response) {
   if (request.method !== "POST") {
@@ -141,9 +195,7 @@ export default async function handler(request, response) {
   }
 
   try {
-    // **FIX**: Vercel automatically parses the JSON body, so we use request.body
     const payload = request.body;
-
     const message =
       payload.message ||
       payload.edited_message ||
@@ -155,64 +207,19 @@ export default async function handler(request, response) {
       return response.status(200).send("OK");
     }
 
-    const chatId = message.chat.id;
+    // **FIX**: Respond to Telegram immediately to prevent retries.
+    response.status(200).send("OK");
 
+    // Now, do the heavy lifting.
     if (message.photo) {
-      await sendMessage(
-        chatId,
-        "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí..."
-      );
-
-      const photo = message.photo.pop();
-      const fileId = photo.file_id;
-
-      const fileInfoUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`;
-      const fileInfoRes = await fetch(fileInfoUrl);
-      const fileInfo = await fileInfoRes.json();
-      const filePath = fileInfo.result.file_path;
-
-      const imageUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`;
-
-      const description = await getVisionDescription(imageUrl);
-      if (!description) {
-        await sendMessage(
-          chatId,
-          "Rất tiếc, Luga Vision không thể mô tả hình ảnh này (chắc do hết lượt dùng trong ngày rồi, mai thử lại nha, do thằng tác giả nghèo nên nó xài đồ free đó). Thử lại lần nữa hoặc thử ảnh khác đi đồng chí!"
-        );
-        return response.status(200).send("OK");
-      }
-
-      const plainTextDescription = cleanMarkdownForTts(description);
-      const customText =
-        "\nĐồng chí còn ảnh nào khác không? Làm khó Luga Vision thử xem!";
-      const fullDescriptionForAudio = plainTextDescription + customText;
-
-      const audio = await getOggAudioFromConverter(fullDescriptionForAudio);
-      if (!audio) {
-        await sendMessage(
-          chatId,
-          `Luga Vision đã gặp lỗi khi đọc cho bạn mô tả (chắc do thằng tác giả nghèo nên nó xài server free, thông cảm đi mà), nên mình gửi cho bạn nội dung dưới dạng tin nhắn nè:\n\n${plainTextDescription}`
-        );
-        return response.status(200).send("OK");
-      }
-
-      await sendVoice(chatId, audio);
-      await sendDocument(chatId, plainTextDescription);
+      processImage(message); // Don't use 'await' here
     } else {
       await sendMessage(
-        chatId,
+        message.chat.id,
         "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết trò chuyện gì khác đâu đồng chí ơi."
       );
     }
   } catch (error) {
     console.error("Error in main handler:", error);
-    if (request.body && request.body.message && request.body.message.chat) {
-      await sendMessage(
-        request.body.message.chat.id,
-        "Đã xảy ra lỗi. Vui lòng thử lại đi đồng chí (thử lại không được thì do thằng tác giả nghèo nên nó xài server free nên có giới hạn, thông cảm cho tớ nhé)."
-      );
-    }
   }
-
-  return response.status(200).send("OK");
 }
