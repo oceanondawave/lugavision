@@ -27,8 +27,8 @@ def convert_text_to_audio():
         # 2. Load the audio from the in-memory file with pydub
         sound = AudioSegment.from_file(gtts_fp, format="mp3")
 
-        # 3. Speed it up (1.75x is a good balance of speed and clarity)
-        fast_sound = sound.speedup(playback_speed=1.75)
+        # 3. Speed it up (1.0 is normal speed)
+        fast_sound = sound.speedup(playback_speed=1.0)
 
         # 4. Export the new, faster audio to another in-memory file in OGG format
         final_audio_fp = BytesIO()
