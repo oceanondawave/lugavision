@@ -16,7 +16,7 @@ OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
 
 app = Flask(__name__)
 
-# **NEW**: A simple in-memory lock to track processing status per user
+# A simple in-memory lock to track processing status per user
 processing_status = {}
 
 # --- HELPER FUNCTIONS ---
@@ -80,12 +80,10 @@ def send_document(chat_id, text_content):
     files = {'document': ('motahinhanh.txt', text_file, 'text/plain')}
     requests.post(url, data={'chat_id': chat_id}, files=files)
 
-# **MODIFIED**: This function now includes the lock release logic
 def process_image(image_url, chat_id):
     """This function runs the entire process and ensures the lock is released."""
     try:
-        # The "processing" message is now sent from the main thread for immediate response.
-        # send_message(chat_id, "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí...")
+        # **REMOVED**: The "processing" message is now sent by the Vercel bot.
 
         description = get_vision_description(image_url)
         if not description:
@@ -98,7 +96,7 @@ def process_image(image_url, chat_id):
 
         audio = get_ogg_audio(full_description_for_audio)
         if not audio:
-            send_message(chat_id, f"Luga Vision đã gặp lỗi khi đọc cho bạn mô tả... nên mình gửi cho bạn nội dung dưới dạng tin nhắn nè:\n\n{plain_text_description}")
+            send_message(chat_id, f"Có thể do thằng tác giả xài server free nên Luga Vision đã gặp lỗi khi đọc cho bạn mô tả... nên mình gửi cho bạn nội dung dưới dạng tin nhắn nè, xem đỡ đi:\n\n{plain_text_description}")
             return
 
         send_voice(chat_id, audio)
@@ -107,11 +105,12 @@ def process_image(image_url, chat_id):
     except Exception as e:
         print(f"Error during image processing for chat_id {chat_id}: {e}")
         traceback.print_exc()
-        send_message(chat_id, "Đã xảy ra lỗi nghiêm trọng trong quá trình xử lý. Vui lòng thử lại sau.")
+        send_message(chat_id, "Đã xảy ra lỗi nghiêm trọng trong quá trình xử lý. Vui lòng thử lại sau. Thật ra chả nghiêm trọng gì đâu, thằng tác giả xài hàng free nên hết lượt xài rồi đó, quay lại vào ngày mai đi đồng chí.")
     finally:
-        # **NEW**: Always release the lock for this user, whether it succeeded or failed.
-        processing_status[chat_id] = False
-        print(f"Released lock for chat_id: {chat_id}")
+        # Always release the lock for this user, whether it succeeded or failed.
+        if chat_id in processing_status:
+            processing_status[chat_id] = False
+            print(f"Released lock for chat_id: {chat_id}")
 
 # --- MAIN ROUTES ---
 
@@ -129,16 +128,17 @@ def process_image_request():
     if not chat_id or not image_url:
         return jsonify({"error": "Missing image_url or chat_id"}), 400
 
-    # **FIX**: Check the lock and send the appropriate message immediately, BEFORE starting the thread.
+    # Check the lock and send the "please wait" message if busy.
     if processing_status.get(chat_id, False):
         print(f"Request denied for chat_id: {chat_id} - already processing.")
-        send_message(chat_id, "Vui lòng chờ Luga Vision xử lý xong ảnh hiện tại đã! Gì mà gấp gáp vậy đồng chí?")
+        send_message(chat_id, "Vui lòng chờ Luga Vision xử lý xong ảnh hiện tại đã! Gì mà gấp gáp vậy đồng chí? Sài Gòn lúc nào chả kẹt xe!")
         return jsonify({"status": "busy"}), 429
 
-    # **FIX**: Set the lock and send the "processing" message immediately.
+    # Set the lock for this user.
     processing_status[chat_id] = True
     print(f"Set lock for chat_id: {chat_id}")
-    send_message(chat_id, "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí...")
+    
+    # **REMOVED**: The "processing" message is now sent by the Vercel bot.
 
     # Start the processing in a background thread so we can respond immediately.
     thread = threading.Thread(target=process_image, args=(image_url, chat_id))
