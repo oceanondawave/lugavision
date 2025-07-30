@@ -82,7 +82,7 @@ export default async function handler(request, response) {
       // **FIX**: Send the "processing" message immediately from the fast Vercel bot.
       await sendMessage(
         chatId,
-        "Luga Vision đang xử lý hình ảnh, kết quả sẽ được trả về dưới dạng tin nhắn giọng nói siêu ngọt của em gái Google và 1 tệp motahinhanh.txt để đồng chí thoải mái copy nôi dung nếu cần. Chờ xíu nha đồng chí (có thể hơi lâu vì xài hàng free mà, trên đời này có gì là miễn phí ngoài nước mưa và phân chim?)..."
+        "Luga Vision đang xử lý hình ảnh, kết quả sẽ được trả về dưới dạng tin nhắn giọng nói siêu ngọt của em gái Google và 1 tệp motahinhanh.txt để đồng chí thoải mái copy nội dung nếu cần. Chờ xíu nha đồng chí (có thể hơi lâu vì xài hàng free mà, trên đời này có gì là miễn phí ngoài nước mưa và phân chim?)..."
       );
 
       const photo = message.photo.pop();
