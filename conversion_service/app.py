@@ -19,7 +19,7 @@ app = Flask(__name__)
 
 def get_vision_description(image_url):
     """Gets a Vietnamese description of an image using the OpenRouter Vision API."""
-    # This function remains the same
+    print("Step 2: Getting vision description from OpenRouter...")
     response = requests.post(
         url="https://openrouter.ai/api/v1/chat/completions",
         headers={
@@ -41,6 +41,7 @@ def get_vision_description(image_url):
     )
     response.raise_for_status()
     data = response.json()
+    print("Step 2 successful.")
     return data['choices'][0]['message']['content']
 
 def clean_markdown_for_tts(text):
@@ -49,49 +50,66 @@ def clean_markdown_for_tts(text):
 
 def get_ogg_audio(text):
     """Converts text to speech using gTTS and returns the audio data as bytes."""
-    # This function remains the same
+    print("Step 3: Generating audio with gTTS...")
     gtts_fp = BytesIO()
     tts = gTTS(text=text, lang='vi', slow=False)
     tts.write_to_fp(gtts_fp)
     gtts_fp.seek(0)
+    
+    print("Step 4: Converting audio to OGG with pydub...")
     sound = AudioSegment.from_file(gtts_fp, format="mp3")
     final_audio_fp = BytesIO()
     sound.export(final_audio_fp, format="ogg", codec="libopus", bitrate="48k")
     final_audio_fp.seek(0)
+    print("Step 4 successful.")
     return final_audio_fp.read()
 
 def send_message(chat_id, text):
     """Sends a text message to a user."""
+    print(f"Sending message to {chat_id}...")
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": chat_id, "text": text})
+    print("Message sent.")
 
 def send_voice(chat_id, ogg_audio_bytes):
     """Sends an OGG audio file as a playable voice message."""
+    print(f"Sending voice message to {chat_id}...")
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVoice"
     files = {'voice': ('voice.ogg', ogg_audio_bytes, 'audio/ogg')}
     requests.post(url, data={'chat_id': chat_id}, files=files)
+    print("Voice message sent.")
 
 def send_document(chat_id, text_content):
     """Sends a text file to a user."""
+    print(f"Sending document to {chat_id}...")
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
     text_file = BytesIO(text_content.encode('utf-8'))
     files = {'document': ('motahinhanh.txt', text_file, 'text/plain')}
     requests.post(url, data={'chat_id': chat_id}, files=files)
+    print("Document sent.")
 
-# --- MAIN ROUTE ---
+# --- MAIN ROUTES ---
+
+# **NEW**: Health check endpoint for debugging
+@app.route('/', methods=['GET'])
+def health_check():
+    """A simple endpoint to confirm the service is running."""
+    print("Health check endpoint was called.")
+    return jsonify({"status": "ok", "message": "Converter is running!"})
 
 @app.route('/process', methods=['POST'])
 def process_image_request():
-    # **FIX**: The entire logic is now inside a single, robust try/except block.
-    # We no longer use background threading.
     current_step = "initializing"
     try:
+        print("Received a new request on /process endpoint.")
         data = request.get_json()
         if not data or 'image_url' not in data or 'chat_id' not in data:
+            print("Request is missing image_url or chat_id.")
             return jsonify({"error": "Missing image_url or chat_id"}), 400
 
         image_url = data['image_url']
         chat_id = data['chat_id']
+        print(f"Processing request for chat_id: {chat_id}")
 
         current_step = "sending 'processing' message"
         send_message(chat_id, "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí...")
@@ -119,15 +137,14 @@ def process_image_request():
         current_step = "sending text document"
         send_document(chat_id, plain_text_description)
         
+        print(f"Successfully processed request for chat_id: {chat_id}")
         return jsonify({"status": "success"})
 
     except Exception as e:
-        # If any step fails, this will catch it and try to notify the user.
         error_message = f"Đã xảy ra lỗi nghiêm trọng ở bước: {current_step}.\n\nChi tiết: {str(e)}"
         print(error_message)
         traceback.print_exc()
         
-        # This is a fallback to notify the user even if chat_id wasn't set yet.
         try:
             chat_id_from_data = request.get_json().get('chat_id')
             if chat_id_from_data:
