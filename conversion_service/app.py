@@ -8,12 +8,16 @@ from gtts import gTTS
 from pydub import AudioSegment
 from io import BytesIO
 import traceback
+import threading
 
 # --- CONFIGURATION ---
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
 
 app = Flask(__name__)
+
+# **NEW**: A simple in-memory lock to track processing status per user
+processing_status = {}
 
 # --- HELPER FUNCTIONS ---
 
@@ -76,66 +80,69 @@ def send_document(chat_id, text_content):
     files = {'document': ('motahinhanh.txt', text_file, 'text/plain')}
     requests.post(url, data={'chat_id': chat_id}, files=files)
 
-# --- MAIN ROUTES ---
-
-@app.route('/', methods=['GET'])
-def health_check():
-    """A simple endpoint to confirm the service is running and configured."""
-    return jsonify({"status": "ok", "message": "Converter is running!"})
-
-@app.route('/process', methods=['POST'])
-def process_image_request():
-    # This function now runs the entire process directly.
-    current_step = "initializing"
+# **MODIFIED**: This function now includes the lock release logic
+def process_image(image_url, chat_id):
+    """This function runs the entire process and ensures the lock is released."""
     try:
-        data = request.get_json()
-        chat_id = data.get('chat_id')
-        image_url = data.get('image_url')
-
-        if not chat_id or not image_url:
-            return jsonify({"error": "Missing image_url or chat_id"}), 400
-
-        current_step = "sending 'processing' message"
         send_message(chat_id, "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí...")
 
-        current_step = "getting vision description"
         description = get_vision_description(image_url)
         if not description:
             send_message(chat_id, "Rất tiếc, Luga Vision không thể mô tả hình ảnh này...")
-            return jsonify({"status": "failed", "reason": "Could not get description"})
+            return
 
-        current_step = "cleaning markdown"
         plain_text_description = clean_markdown_for_tts(description)
         custom_text = "\nĐồng chí còn ảnh nào khác không? Làm khó Luga Vision thử xem!"
         full_description_for_audio = plain_text_description + custom_text
 
-        current_step = "generating audio"
         audio = get_ogg_audio(full_description_for_audio)
         if not audio:
             send_message(chat_id, f"Luga Vision đã gặp lỗi khi đọc cho bạn mô tả... nên mình gửi cho bạn nội dung dưới dạng tin nhắn nè:\n\n{plain_text_description}")
-            return jsonify({"status": "failed", "reason": "Audio generation failed"})
+            return
 
-        current_step = "sending voice message"
         send_voice(chat_id, audio)
-        
-        current_step = "sending text document"
         send_document(chat_id, plain_text_description)
-        
-        return jsonify({"status": "success"})
 
     except Exception as e:
-        error_message = f"Đã xảy ra lỗi ở bước: {current_step}.\n\nChi tiết: {str(e)}"
-        print(error_message)
+        print(f"Error during image processing for chat_id {chat_id}: {e}")
         traceback.print_exc()
-        
-        try:
-            chat_id_from_data = request.get_json().get('chat_id')
-            if chat_id_from_data:
-                send_message(chat_id_from_data, error_message)
-        except Exception as notify_error:
-            print(f"Failed to notify user of error: {notify_error}")
-            
-        return jsonify({"error": "An internal error occurred", "details": str(e)}), 500
+        send_message(chat_id, "Đã xảy ra lỗi nghiêm trọng trong quá trình xử lý. Vui lòng thử lại sau.")
+    finally:
+        # **NEW**: Always release the lock for this user, whether it succeeded or failed.
+        processing_status[chat_id] = False
+        print(f"Released lock for chat_id: {chat_id}")
+
+# --- MAIN ROUTES ---
+
+@app.route('/', methods=['GET'])
+def health_check():
+    """A simple endpoint to confirm the service is running."""
+    return jsonify({"status": "ok", "message": "Converter is running!"})
+
+@app.route('/process', methods=['POST'])
+def process_image_request():
+    data = request.get_json()
+    chat_id = data.get('chat_id')
+    image_url = data.get('image_url')
+
+    if not chat_id or not image_url:
+        return jsonify({"error": "Missing image_url or chat_id"}), 400
+
+    # **NEW**: Check if this user is already processing an image.
+    if processing_status.get(chat_id, False):
+        print(f"Request denied for chat_id: {chat_id} - already processing.")
+        send_message(chat_id, "Vui lòng chờ Luga Vision xử lý xong ảnh hiện tại đã! Gì mà gấp gáp vậy đồng chí?")
+        return jsonify({"status": "busy"}), 429 # HTTP 429: Too Many Requests
+
+    # **NEW**: Set the lock for this user.
+    processing_status[chat_id] = True
+    print(f"Set lock for chat_id: {chat_id}")
+
+    # Start the processing in a background thread so we can respond immediately.
+    thread = threading.Thread(target=process_image, args=(image_url, chat_id))
+    thread.start()
+
+    return jsonify({"status": "processing_started"}), 202
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
