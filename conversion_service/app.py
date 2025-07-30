@@ -90,12 +90,23 @@ def send_document(chat_id, text_content):
 
 # --- MAIN ROUTES ---
 
-# **NEW**: Health check endpoint for debugging
+# **MODIFIED**: Health check now verifies environment variables.
 @app.route('/', methods=['GET'])
 def health_check():
-    """A simple endpoint to confirm the service is running."""
+    """A simple endpoint to confirm the service is running and configured."""
     print("Health check endpoint was called.")
-    return jsonify({"status": "ok", "message": "Converter is running!"})
+    
+    # Check if the environment variables are loaded
+    tg_token_loaded = "loaded" if TELEGRAM_BOT_TOKEN else "missing"
+    or_key_loaded = "loaded" if OPENROUTER_API_KEY else "missing"
+    
+    status = "ok" if tg_token_loaded == "loaded" and or_key_loaded == "loaded" else "error"
+    
+    return jsonify({
+        "status": status,
+        "TELEGRAM_BOT_TOKEN": tg_token_loaded,
+        "OPENROUTER_API_KEY": or_key_loaded
+    })
 
 @app.route('/process', methods=['POST'])
 def process_image_request():
