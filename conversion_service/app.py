@@ -84,7 +84,8 @@ def send_document(chat_id, text_content):
 def process_image(image_url, chat_id):
     """This function runs the entire process and ensures the lock is released."""
     try:
-        send_message(chat_id, "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí...")
+        # The "processing" message is now sent from the main thread for immediate response.
+        # send_message(chat_id, "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí...")
 
         description = get_vision_description(image_url)
         if not description:
@@ -128,15 +129,16 @@ def process_image_request():
     if not chat_id or not image_url:
         return jsonify({"error": "Missing image_url or chat_id"}), 400
 
-    # **NEW**: Check if this user is already processing an image.
+    # **FIX**: Check the lock and send the appropriate message immediately, BEFORE starting the thread.
     if processing_status.get(chat_id, False):
         print(f"Request denied for chat_id: {chat_id} - already processing.")
         send_message(chat_id, "Vui lòng chờ Luga Vision xử lý xong ảnh hiện tại đã! Gì mà gấp gáp vậy đồng chí?")
-        return jsonify({"status": "busy"}), 429 # HTTP 429: Too Many Requests
+        return jsonify({"status": "busy"}), 429
 
-    # **NEW**: Set the lock for this user.
+    # **FIX**: Set the lock and send the "processing" message immediately.
     processing_status[chat_id] = True
     print(f"Set lock for chat_id: {chat_id}")
+    send_message(chat_id, "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí...")
 
     # Start the processing in a background thread so we can respond immediately.
     thread = threading.Thread(target=process_image, args=(image_url, chat_id))
