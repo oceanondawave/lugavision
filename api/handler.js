@@ -1,10 +1,10 @@
 // --- CONFIGURATION ---
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-// The URL of your deployed Python service on Koyeb
+// The URL of your deployed Python service on Appliku
 const WORKER_API_URL = process.env.CONVERTER_API_URL;
 
 /**
- * Sends a task to the Koyeb service to process an image.
+ * Sends a task to the worker service to process an image.
  * This function fires the request and does not wait for a response.
  * @param {string} imageUrl The public URL of the image.
  * @param {number} chatId The user's chat ID.
@@ -58,8 +58,10 @@ export default async function handler(request, response) {
       return response.status(200).send("OK");
     }
 
+    // Immediately respond to Telegram to prevent retries.
+    response.status(200).send("OK");
+
     if (message.photo) {
-      // For photos, we delegate the task and respond immediately.
       const chatId = message.chat.id;
       const photo = message.photo.pop();
       const fileId = photo.file_id;
@@ -71,30 +73,22 @@ export default async function handler(request, response) {
 
       if (!fileInfo.ok) {
         console.error("Failed to get file info from Telegram:", fileInfo);
-        return response.status(200).send("OK");
+        return;
       }
 
       const filePath = fileInfo.result.file_path;
       const imageUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`;
 
-      // Delegate the long-running task to the Koyeb service (fire-and-forget)
+      // Delegate the long-running task to the worker service (fire-and-forget)
       delegate_task_to_worker(imageUrl, chatId);
-
-      // Immediately respond to Telegram to prevent retries.
-      return response.status(200).send("OK");
     } else {
       // For text messages, the reply is fast, so we can await it.
       await sendMessage(
         message.chat.id,
         "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết trò chuyện gì khác đâu đồng chí ơi. Nếu cần người nói chuyện thì nhắn cho người yêu đi, nếu không có thì... HAHAHA cái đồ FA!"
       );
-      return response.status(200).send("OK");
     }
   } catch (error) {
     console.error("Error in main handler:", error);
-    // In case of any error, still send an OK response so Telegram doesn't retry.
-    if (!response.headersSent) {
-      response.status(200).send("OK");
-    }
   }
 }
