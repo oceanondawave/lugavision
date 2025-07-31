@@ -1,44 +1,29 @@
 // --- CONFIGURATION ---
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-// The URL of your deployed Python conversion API on Koyeb
-const CONVERTER_API_URL = process.env.CONVERTER_API_URL;
+// The URL of your deployed Python service on Koyeb
+const WORKER_API_URL = process.env.CONVERTER_API_URL; // Keep the same env var name for now
 
 /**
  * Sends a task to the Koyeb service to process an image.
+ * This function now fires the request and does not wait for a response.
  * @param {string} imageUrl The public URL of the image.
  * @param {number} chatId The user's chat ID.
- * @returns {Promise<boolean>} True if the task was delegated successfully.
  */
-async function delegate_task_to_worker(imageUrl, chatId) {
-  if (!CONVERTER_API_URL) {
+function delegate_task_to_worker(imageUrl, chatId) {
+  if (!WORKER_API_URL) {
     console.error("CONVERTER_API_URL is not set.");
-    return false;
+    return;
   }
-  try {
-    const response = await fetch(`${CONVERTER_API_URL}/process`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image_url: imageUrl, chat_id: chatId }),
-    });
-
-    // Check if the worker is busy (status 429)
-    if (response.status === 429) {
-      // The worker has already sent the "please wait" message.
-      // We don't need to do anything else.
-      console.log("Worker is busy, request acknowledged.");
-      return true; // This is a "successful" outcome from the Vercel bot's perspective.
-    }
-
-    if (!response.ok) {
-      console.error("Error from worker service:", await response.text());
-      return false;
-    }
-
-    return true; // Success
-  } catch (error) {
+  // Fire-and-forget: We send the request but don't use 'await'.
+  // This lets the Vercel function finish instantly.
+  fetch(`${WORKER_API_URL}/process`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image_url: imageUrl, chat_id: chatId }),
+  }).catch((error) => {
+    // We log the error, but don't block the function.
     console.error("Error delegating task to worker:", error);
-    return false;
-  }
+  });
 }
 
 /**
@@ -73,18 +58,8 @@ export default async function handler(request, response) {
       return response.status(200).send("OK");
     }
 
-    // Acknowledge the request to Telegram immediately to prevent retries.
-    response.status(200).send("OK");
-
     if (message.photo) {
       const chatId = message.chat.id;
-
-      // **FIX**: Send the "processing" message immediately from the fast Vercel bot.
-      await sendMessage(
-        chatId,
-        "Luga Vision đang xử lý hình ảnh, kết quả sẽ được trả về dưới dạng tin nhắn giọng nói siêu ngọt của em gái Google và 1 tệp motahinhanh.txt để đồng chí thoải mái copy nội dung nếu cần. Chờ xíu nha đồng chí (có thể hơi lâu vì xài hàng free mà, trên đời này có gì là miễn phí ngoài nước mưa và phân chim?)..."
-      );
-
       const photo = message.photo.pop();
       const fileId = photo.file_id;
 
@@ -92,18 +67,33 @@ export default async function handler(request, response) {
       const fileInfoUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`;
       const fileInfoRes = await fetch(fileInfoUrl);
       const fileInfo = await fileInfoRes.json();
+
+      if (!fileInfo.ok) {
+        console.error("Failed to get file info from Telegram:", fileInfo);
+        return response.status(200).send("OK");
+      }
+
       const filePath = fileInfo.result.file_path;
       const imageUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`;
 
-      // Delegate the task to the worker. We don't await this, as it can be slow.
+      // Delegate the task to the Koyeb service (fire-and-forget)
       delegate_task_to_worker(imageUrl, chatId);
+
+      // Immediately respond to Telegram to prevent retries.
+      return response.status(200).send("OK");
     } else {
+      // For text messages, the reply is fast, so we can await it.
       await sendMessage(
         message.chat.id,
         "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết trò chuyện gì khác đâu đồng chí ơi. Nếu cần người nói chuyện thì nhắn cho người yêu đi, nếu không có thì... HAHAHA cái đồ FA!"
       );
+      return response.status(200).send("OK");
     }
   } catch (error) {
     console.error("Error in main handler:", error);
+    // In case of any error, still send an OK response so Telegram doesn't retry.
+    if (!response.headersSent) {
+      response.status(200).send("OK");
+    }
   }
 }

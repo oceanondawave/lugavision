@@ -83,7 +83,8 @@ def send_document(chat_id, text_content):
 def process_image(image_url, chat_id):
     """This function runs the entire process and ensures the lock is released."""
     try:
-        send_message(chat_id, "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí...")
+        # **This service now sends the "processing" message.**
+        send_message(chat_id, "Luga Vision đang xử lý hình ảnh, kết quả sẽ được trả về dưới dạng tin nhắn giọng nói siêu ngọt của em gái Google và 1 tệp motahinhanh.txt để đồng chí thoải mái copy nội dung nếu cần. Chờ xíu nha đồng chí (có thể hơi lâu vì xài hàng free mà, trên đời này có gì là miễn phí ngoài nước mưa và phân chim?)...")
 
         description = get_vision_description(image_url)
         if not description:
