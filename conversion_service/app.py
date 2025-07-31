@@ -94,8 +94,6 @@ def process_image_request():
         if not chat_id or not image_url:
             return jsonify({"error": "Missing image_url or chat_id"}), 400
 
-        # **REMOVED**: The "processing" message is now sent by the Vercel bot.
-
         description = get_vision_description(image_url)
         if not description:
             send_message(chat_id, "Rất tiếc, Luga Vision không thể mô tả hình ảnh này...")
