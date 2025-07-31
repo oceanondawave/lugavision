@@ -8,16 +8,12 @@ from gtts import gTTS
 from pydub import AudioSegment
 from io import BytesIO
 import traceback
-import threading
 
 # --- CONFIGURATION ---
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
 
 app = Flask(__name__)
-
-# A simple in-memory lock to track processing status per user
-processing_status = {}
 
 # --- HELPER FUNCTIONS ---
 
@@ -80,38 +76,6 @@ def send_document(chat_id, text_content):
     files = {'document': ('motahinhanh.txt', text_file, 'text/plain')}
     requests.post(url, data={'chat_id': chat_id}, files=files)
 
-def process_image(image_url, chat_id):
-    """This function runs the entire process and ensures the lock is released."""
-    try:
-        # **REMOVED**: The "processing" message is now sent by the Vercel bot.
-
-        description = get_vision_description(image_url)
-        if not description:
-            send_message(chat_id, "Rất tiếc, Luga Vision không thể mô tả hình ảnh này...")
-            return
-
-        plain_text_description = clean_markdown_for_tts(description)
-        custom_text = "\nĐồng chí còn ảnh nào khác không? Làm khó Luga Vision thử xem!"
-        full_description_for_audio = plain_text_description + custom_text
-
-        audio = get_ogg_audio(full_description_for_audio)
-        if not audio:
-            send_message(chat_id, f"Có thể do thằng tác giả xài server free nên Luga Vision đã gặp lỗi khi đọc cho bạn mô tả... nên mình gửi cho bạn nội dung dưới dạng tin nhắn nè, xem đỡ đi:\n\n{plain_text_description}")
-            return
-
-        send_voice(chat_id, audio)
-        send_document(chat_id, plain_text_description)
-
-    except Exception as e:
-        print(f"Error during image processing for chat_id {chat_id}: {e}")
-        traceback.print_exc()
-        send_message(chat_id, "Đã xảy ra lỗi nghiêm trọng trong quá trình xử lý. Vui lòng thử lại sau. Thật ra chả nghiêm trọng gì đâu, thằng tác giả xài hàng free nên hết lượt xài rồi đó, quay lại vào ngày mai đi đồng chí.")
-    finally:
-        # Always release the lock for this user, whether it succeeded or failed.
-        if chat_id in processing_status:
-            processing_status[chat_id] = False
-            print(f"Released lock for chat_id: {chat_id}")
-
 # --- MAIN ROUTES ---
 
 @app.route('/', methods=['GET'])
@@ -121,28 +85,48 @@ def health_check():
 
 @app.route('/process', methods=['POST'])
 def process_image_request():
-    data = request.get_json()
-    chat_id = data.get('chat_id')
-    image_url = data.get('image_url')
+    # This function is now simple and direct, with no threading or locking.
+    try:
+        data = request.get_json()
+        chat_id = data.get('chat_id')
+        image_url = data.get('image_url')
 
-    if not chat_id or not image_url:
-        return jsonify({"error": "Missing image_url or chat_id"}), 400
+        if not chat_id or not image_url:
+            return jsonify({"error": "Missing image_url or chat_id"}), 400
 
-    # Check the lock and send the "please wait" message if busy.
-    if processing_status.get(chat_id, False):
-        print(f"Request denied for chat_id: {chat_id} - already processing.")
-        send_message(chat_id, "Vui lòng chờ Luga Vision xử lý xong ảnh hiện tại đã! Gì mà gấp gáp vậy đồng chí? Sài Gòn lúc nào chả kẹt xe!")
-        return jsonify({"status": "busy"}), 429
+        # **REMOVED**: The "processing" message is now sent by the Vercel bot.
 
-    # Set the lock for this user.
-    processing_status[chat_id] = True
-    print(f"Set lock for chat_id: {chat_id}")
+        description = get_vision_description(image_url)
+        if not description:
+            send_message(chat_id, "Rất tiếc, Luga Vision không thể mô tả hình ảnh này...")
+            return jsonify({"status": "failed", "reason": "Could not get description"})
 
-    # Start the processing in a background thread so we can respond immediately.
-    thread = threading.Thread(target=process_image, args=(image_url, chat_id))
-    thread.start()
+        plain_text_description = clean_markdown_for_tts(description)
+        custom_text = "\nĐồng chí còn ảnh nào khác không? Làm khó Luga Vision thử xem!"
+        full_description_for_audio = plain_text_description + custom_text
 
-    return jsonify({"status": "processing_started"}), 202
+        audio = get_ogg_audio(full_description_for_audio)
+        if not audio:
+            send_message(chat_id, f"Có thể do thằng tác giả xài server free nên Luga Vision đã gặp lỗi khi đọc cho bạn mô tả... nên mình gửi cho bạn nội dung dưới dạng tin nhắn nè, xem đỡ đi:\n\n{plain_text_description}")
+            return jsonify({"status": "failed", "reason": "Audio generation failed"})
+
+        send_voice(chat_id, audio)
+        send_document(chat_id, plain_text_description)
+        
+        return jsonify({"status": "success"})
+
+    except Exception as e:
+        print(f"Error during image processing: {e}")
+        traceback.print_exc()
+        try:
+            # Try to notify the user of the failure
+            chat_id_from_data = request.get_json().get('chat_id')
+            if chat_id_from_data:
+                send_message(chat_id_from_data, "Đã xảy ra lỗi nghiêm trọng trong quá trình xử lý. Vui lòng thử lại sau. Thật ra chả nghiêm trọng gì đâu, thằng tác giả xài hàng free nên hết lượt xài rồi đó, quay lại vào ngày mai đi đồng chí.")
+        except Exception as notify_error:
+            print(f"Failed to notify user of error: {notify_error}")
+            
+        return jsonify({"error": "An internal error occurred", "details": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
