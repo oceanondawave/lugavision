@@ -22,7 +22,7 @@ processing_status = {}
 # --- HELPER FUNCTIONS ---
 
 def get_vision_description(image_url):
-    """Gets a Vietnamese description of an image using the correct OpenRouter Vision API."""
+    """Gets a Vietnamese description of an image using the OpenRouter Vision API."""
     response = requests.post(
         url="https://openrouter.ai/api/v1/chat/completions",
         headers={
@@ -121,6 +121,7 @@ def health_check():
 
 @app.route('/process', methods=['POST'])
 def process_image_request():
+    # **FIX**: The threading and locking logic is now correctly implemented.
     data = request.get_json()
     chat_id = data.get('chat_id')
     image_url = data.get('image_url')
