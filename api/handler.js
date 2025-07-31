@@ -58,10 +58,8 @@ export default async function handler(request, response) {
       return response.status(200).send("OK");
     }
 
-    // Immediately respond to Telegram to prevent retries. This is the most important step.
-    response.status(200).send("OK");
-
     if (message.photo) {
+      // For photos, we delegate the task and respond immediately.
       const chatId = message.chat.id;
       const photo = message.photo.pop();
       const fileId = photo.file_id;
@@ -73,7 +71,7 @@ export default async function handler(request, response) {
 
       if (!fileInfo.ok) {
         console.error("Failed to get file info from Telegram:", fileInfo);
-        return;
+        return response.status(200).send("OK");
       }
 
       const filePath = fileInfo.result.file_path;
@@ -81,14 +79,22 @@ export default async function handler(request, response) {
 
       // Delegate the long-running task to the Koyeb service (fire-and-forget)
       delegate_task_to_worker(imageUrl, chatId);
+
+      // Immediately respond to Telegram to prevent retries.
+      return response.status(200).send("OK");
     } else {
       // For text messages, the reply is fast, so we can await it.
       await sendMessage(
         message.chat.id,
         "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết trò chuyện gì khác đâu đồng chí ơi. Nếu cần người nói chuyện thì nhắn cho người yêu đi, nếu không có thì... HAHAHA cái đồ FA!"
       );
+      return response.status(200).send("OK");
     }
   } catch (error) {
     console.error("Error in main handler:", error);
+    // In case of any error, still send an OK response so Telegram doesn't retry.
+    if (!response.headersSent) {
+      response.status(200).send("OK");
+    }
   }
 }

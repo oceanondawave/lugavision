@@ -22,7 +22,7 @@ processing_status = {}
 # --- HELPER FUNCTIONS ---
 
 def get_vision_description(image_url):
-    """Gets a Vietnamese description of an image using the OpenRouter Vision API."""
+    """Gets a Vietnamese description of an image using the correct OpenRouter Vision API."""
     response = requests.post(
         url="https://openrouter.ai/api/v1/chat/completions",
         headers={
