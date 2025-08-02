@@ -93,6 +93,16 @@ async function sendMessage(chatId, text) {
   });
 }
 
+/**
+ * Removes common markdown characters from text.
+ * @param {string} text The text to clean.
+ * @returns {string} The cleaned text.
+ */
+function cleanMarkdown(text) {
+  // This regular expression finds and removes *, _, ~, `, and # characters globally.
+  return text.replace(/[*_~`#]/g, "");
+}
+
 // --- MAIN HANDLER ---
 export default async function handler(request, response) {
   if (request.method !== "POST") {
@@ -173,7 +183,8 @@ export default async function handler(request, response) {
             "Rất tiếc, Luga Vision không thể mô tả hình ảnh này. Thử lại lần nữa hoặc thử ảnh khác đi đồng chí!"
           );
         } else {
-          await sendMessage(chatId, description);
+          const plainTextDescription = cleanMarkdown(description);
+          await sendMessage(chatId, plainTextDescription);
         }
       } finally {
         // **MODIFIED**: Always release the lock from the database.
@@ -182,7 +193,7 @@ export default async function handler(request, response) {
     } else {
       await sendMessage(
         chatId,
-        "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết trò chuyện gì khác đâu đồng chí ơi. Nếu cần người nói chuyện thì nhắn cho người yêu đi, nếu không có thì... HAHAHA cái đồ FA!"
+        "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết trò chuyện gì khác đâu đồng chí ơi. Nếu cần người nói chuyện thì nhắn cho người yêu đi, nếu không có thì... kệ đồng chí chứ vì tác giả đã có người yêu rồi HAHAHA!"
       );
     }
   } catch (error) {
