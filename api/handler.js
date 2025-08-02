@@ -1,33 +1,86 @@
+// This file should be named api/handler.js
+
+import { neon } from "@neondatabase/serverless";
+
 // --- CONFIGURATION ---
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-// The URL of your deployed Python service on Appliku
-const WORKER_API_URL = process.env.CONVERTER_API_URL;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+// **NEW**: Your Neon database connection string from the Vercel integration.
+const DATABASE_URL = process.env.POSTGRES_URL;
+
+// Initialize the database connection
+const sql = neon(DATABASE_URL);
 
 /**
- * Sends a task to the worker service to process an image.
- * This function fires the request and does not wait for a response.
- * @param {string} imageUrl The public URL of the image.
- * @param {number} chatId The user's chat ID.
+ * **NEW**: A function to ensure the database table for locks exists.
  */
-function delegate_task_to_worker(imageUrl, chatId) {
-  if (!WORKER_API_URL) {
-    console.error("CONVERTER_API_URL is not set.");
-    return;
+async function ensureLockTableExists() {
+  await sql`
+    CREATE TABLE IF NOT EXISTS user_locks (
+      chat_id BIGINT PRIMARY KEY,
+      locked_at TIMESTAMP DEFAULT NOW()
+    );
+  `;
+}
+
+// --- API HELPER FUNCTIONS ---
+
+/**
+ * Gets a Vietnamese description of an image using the OpenRouter Vision API.
+ * @param {string} imageUrl The public URL of the image to describe.
+ * @returns {Promise<{description: string|null, error: string|null}>} An object with the description or an error message.
+ */
+async function getVisionDescription(imageUrl) {
+  try {
+    const response = await fetch(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemma-3-27b-it:free",
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Hãy mô tả hình ảnh từ khái quát đến chi tiết, càng chi tiết càng tốt. Mô tả ảnh phải hợp lý và chi tiết về không gian và hãy mô tả với chất lượng tốt nhất có thể để giúp người khiếm thị nhận biết và có trải nghiệm thật chính xác. Mô tả phải chân thực và chính xác, không bỏ sót bất kỳ chi tiết nào, không được thay đổi sự thật và bịa đặt về chi tiết không có thật trong hình ảnh. Nếu trong ảnh có chữ bằng Tiếng Anh hoặc ngôn ngữ khác, hãy giữ nguyên nó trong câu trả lời sau đó dịch sang Tiếng Việt. Hãy luôn trả về ngay mô tả hình ảnh, không cần giới thiệu hay nhắc lại yêu cầu.",
+                },
+                {
+                  type: "image_url",
+                  image_url: { url: imageUrl },
+                },
+              ],
+            },
+          ],
+        }),
+      }
+    );
+
+    if (response.status === 429) {
+      console.error("OpenRouter API rate limit hit.");
+      return { description: null, error: "rate_limit" };
+    }
+
+    if (!response.ok) {
+      console.error("OpenRouter Vision API error:", await response.text());
+      return { description: null, error: "api_error" };
+    }
+
+    const data = await response.json();
+    return { description: data.choices[0].message.content, error: null };
+  } catch (error) {
+    console.error("Error calling Vision API:", error);
+    return { description: null, error: "network_error" };
   }
-  // Fire-and-forget: We send the request but don't use 'await'.
-  // This lets the Vercel function finish instantly.
-  fetch(`${WORKER_API_URL}/process`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ image_url: imageUrl, chat_id: chatId }),
-  }).catch((error) => {
-    // We log the error, but don't block the function.
-    console.error("Error delegating task to worker:", error);
-  });
 }
 
 /**
- * Sends a simple text message.
+ * Sends a text message to a user.
  * @param {number} chatId The user's chat ID.
  * @param {string} text The message to send.
  */
@@ -47,6 +100,9 @@ export default async function handler(request, response) {
   }
 
   try {
+    // Ensure the table exists before processing any messages.
+    await ensureLockTableExists();
+
     const payload = request.body;
     const message =
       payload.message ||
@@ -58,44 +114,80 @@ export default async function handler(request, response) {
       return response.status(200).send("OK");
     }
 
-    // Immediately respond to Telegram to prevent retries.
-    response.status(200).send("OK");
+    const chatId = message.chat.id;
 
     if (message.photo) {
-      const chatId = message.chat.id;
+      // **MODIFIED**: Anti-spam logic using Neon Postgres.
+      // First, clear any old, stuck locks (older than 2 minutes).
+      await sql`DELETE FROM user_locks WHERE locked_at < NOW() - INTERVAL '2 minutes'`;
 
-      // **FIX**: Send the "processing" message immediately from the fast Vercel bot.
-      await sendMessage(
-        chatId,
-        "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí..."
-      );
-
-      const photo = message.photo.pop();
-      const fileId = photo.file_id;
-
-      // Get the image URL from Telegram
-      const fileInfoUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`;
-      const fileInfoRes = await fetch(fileInfoUrl);
-      const fileInfo = await fileInfoRes.json();
-
-      if (!fileInfo.ok) {
-        console.error("Failed to get file info from Telegram:", fileInfo);
-        return;
+      // Try to acquire a lock.
+      try {
+        await sql`INSERT INTO user_locks (chat_id) VALUES (${chatId})`;
+      } catch (e) {
+        // If the insert fails, it's because the chat_id (primary key) already exists.
+        // This means the user is locked.
+        console.log(`User ${chatId} is already locked.`);
+        await sendMessage(
+          chatId,
+          "Vui lòng chờ Luga Vision xử lý xong ảnh hiện tại đã! Gì mà gấp gáp vậy đồng chí? Sài Gòn lúc nào mà chả kẹt xe?"
+        );
+        return response.status(200).send("OK");
       }
 
-      const filePath = fileInfo.result.file_path;
-      const imageUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`;
+      try {
+        await sendMessage(
+          chatId,
+          "Luga Vision đang xử lý hình ảnh, chờ xíu nha đồng chí..."
+        );
 
-      // Delegate the long-running task to the Appliku service (fire-and-forget)
-      delegate_task_to_worker(imageUrl, chatId);
+        const photo = message.photo.pop();
+        const fileId = photo.file_id;
+
+        const fileInfoUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`;
+        const fileInfoRes = await fetch(fileInfoUrl);
+        const fileInfo = await fileInfoRes.json();
+
+        if (!fileInfo.ok) {
+          console.error("Failed to get file info:", fileInfo);
+          await sendMessage(
+            chatId,
+            "Lỗi: Không thể lấy thông tin ảnh từ Telegram."
+          );
+          return response.status(200).send("OK");
+        }
+
+        const filePath = fileInfo.result.file_path;
+        const imageUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`;
+
+        const { description, error } = await getVisionDescription(imageUrl);
+
+        if (error === "rate_limit") {
+          await sendMessage(
+            chatId,
+            "Luga Vision đang bị quá tải do có nhiều đồng chí khác đang sử dụng hoặc đồng chí đã sử dụng quá nhiều (do thằng tác giả nghèo nên nó xài đồ free đó). Vui lòng thử lại sau vài phút nha!"
+          );
+        } else if (error) {
+          await sendMessage(
+            chatId,
+            "Rất tiếc, Luga Vision không thể mô tả hình ảnh này. Thử lại lần nữa hoặc thử ảnh khác đi đồng chí!"
+          );
+        } else {
+          await sendMessage(chatId, description);
+        }
+      } finally {
+        // **MODIFIED**: Always release the lock from the database.
+        await sql`DELETE FROM user_locks WHERE chat_id = ${chatId}`;
+      }
     } else {
-      // For text messages, the reply is fast, so we can await it.
       await sendMessage(
-        message.chat.id,
+        chatId,
         "Chào bạn hiền, vui lòng gửi một hình ảnh để Luga Vision miêu tả cho bạn. Tớ chỉ biết mô tả hình ảnh chứ không biết trò chuyện gì khác đâu đồng chí ơi. Nếu cần người nói chuyện thì nhắn cho người yêu đi, nếu không có thì... HAHAHA cái đồ FA!"
       );
     }
   } catch (error) {
     console.error("Error in main handler:", error);
   }
+
+  return response.status(200).send("OK");
 }

@@ -1,5 +1,0 @@
-Flask
-gTTS
-pydub
-gunicorn
-requests
